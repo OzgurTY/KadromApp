@@ -3,10 +3,10 @@ import { View, Text, TouchableOpacity, ScrollView, Platform, Alert, StyleSheet }
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { globalStyles } from '../../theme/globalStyles';
 import { colors } from '../../theme/colors';
-import CustomInput from '../../components/common/CustomInput';
 import { createMatch } from '../../services/matchService';
 import Screen from '../../components/common/Screen';
 import Toast from 'react-native-toast-message';
+import ModernInput from '../../components/common/ModernInput';
 
 export default function CreateMatchScreen({ navigation }) {
     const [location, setLocation] = useState('');
@@ -68,7 +68,7 @@ export default function CreateMatchScreen({ navigation }) {
                     <Text style={globalStyles.title}>Yeni Maç Oluştur</Text>
 
                     <Text style={styles.label}>Saha / Konum</Text>
-                    <CustomInput placeholder="Örn: Yıldız Halısaha" value={location} onChangeText={setLocation} />
+                    <ModernInput placeholder="Örn: Yıldız Halısaha" value={location} onChangeText={setLocation} />
 
                     <Text style={styles.label}>Tarih ve Saat</Text>
                     {/* Tarih Seçici Butonu */}
@@ -93,10 +93,10 @@ export default function CreateMatchScreen({ navigation }) {
                     )}
 
                     <Text style={styles.label}>Kişi Başı Ücret (TL)</Text>
-                    <CustomInput placeholder="150" value={price} onChangeText={setPrice} keyboardType="numeric" />
+                    <ModernInput placeholder="150" value={price} onChangeText={setPrice} keyboardType="numeric" />
 
                     <Text style={styles.label}>IBAN (Opsiyonel)</Text>
-                    <CustomInput placeholder="TR..." value={iban} onChangeText={setIban} />
+                    <ModernInput placeholder="TR..." value={iban} onChangeText={setIban} />
 
                     <TouchableOpacity
                         style={[styles.createButton, { opacity: loading ? 0.7 : 1 }]}

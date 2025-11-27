@@ -3,15 +3,16 @@ import {
   addDoc, 
   getDocs, 
   getDoc, 
-  updateDoc,
-  deleteDoc,
+  updateDoc, 
+  deleteDoc, 
   doc, 
   query, 
-  where, // Bu eksikti, şimdi eklendi
+  where, 
   orderBy, 
   arrayUnion, 
-  arrayRemove, 
-  runTransaction 
+  runTransaction,
+  increment,
+  writeBatch
 } from 'firebase/firestore';
 import { db, auth } from '../config/firebaseConfig';
 
@@ -20,7 +21,7 @@ export const createMatch = async (matchData) => {
   try {
     const docRef = await addDoc(collection(db, "matches"), {
       ...matchData,
-      createdBy: auth.currentUser.uid, // YENİ: Maçı kimin oluşturduğunu kaydediyoruz
+      createdBy: auth.currentUser.uid,
       createdAt: new Date().toISOString(),
       status: 'upcoming', 
       players: [],
@@ -35,7 +36,7 @@ export const createMatch = async (matchData) => {
   }
 };
 
-// Duruma Göre Maçları Getir (Gelecek veya Geçmiş)
+// Maçları Listele
 export const getMatchesByStatus = async (status) => {
   try {
     const now = new Date().toISOString();
@@ -43,19 +44,9 @@ export const getMatchesByStatus = async (status) => {
     let q;
 
     if (status === 'upcoming') {
-      // Gelecek Maçlar: Tarihi şu andan büyük olanlar (Yakından uzağa)
-      q = query(
-        matchesRef, 
-        where("date", ">=", now), 
-        orderBy("date", "asc")
-      );
+      q = query(matchesRef, where("date", ">=", now), orderBy("date", "asc"));
     } else {
-      // Geçmiş Maçlar: Tarihi şu andan küçük olanlar (Yeniden eskiye)
-      q = query(
-        matchesRef, 
-        where("date", "<", now), 
-        orderBy("date", "desc")
-      );
+      q = query(matchesRef, where("date", "<", now), orderBy("date", "desc"));
     }
 
     const querySnapshot = await getDocs(q);
@@ -63,15 +54,14 @@ export const getMatchesByStatus = async (status) => {
     querySnapshot.forEach((doc) => {
       matches.push({ id: doc.id, ...doc.data() });
     });
-    
     return matches;
   } catch (error) {
     console.error("Maç çekme hatası: ", error);
-    throw error; // Hatayı fırlatalım ki UI yakalayabilsin
+    throw error;
   }
 };
 
-// Maç Detayını Getir
+// Maç Detayı
 export const getMatchDetails = async (matchId) => {
     const docRef = doc(db, "matches", matchId);
     const docSnap = await getDoc(docRef);
@@ -79,11 +69,9 @@ export const getMatchDetails = async (matchId) => {
     throw new Error("Maç bulunamadı");
 };
 
-// Takım Değiştirme ve Katılma Mantığı
+// Takıma Katıl / Değiştir
 export const joinOrSwitchTeam = async (matchId, targetTeam, playerData) => {
     const matchRef = doc(db, "matches", matchId);
-    
-    // Veritabanına kaydedilecek minimal oyuncu verisi
     const playerMinData = {
         id: playerData.id,
         fullName: playerData.fullName,
@@ -100,22 +88,14 @@ export const joinOrSwitchTeam = async (matchId, targetTeam, playerData) => {
             const teamA = data.teamA || [];
             const teamB = data.teamB || [];
             
-            // Hedef ve Diğer takım dizilerini belirle
             const targetArray = targetTeam === 'A' ? teamA : teamB;
             const otherArray = targetTeam === 'A' ? teamB : teamA;
 
-            // 1. Oyuncu zaten hedef takımda mı?
-            if (targetArray.some(p => p.id === playerData.id)) {
-                return; 
-            }
+            if (targetArray.some(p => p.id === playerData.id)) return; 
 
-            // 2. Oyuncu diğer takımda mı? (Varsa oradan sil)
             const newOtherArray = otherArray.filter(p => p.id !== playerData.id);
-
-            // 3. Hedef takıma ekle
             const newTargetArray = [...targetArray, playerMinData];
 
-            // 4. Güncelle
             if (targetTeam === 'A') {
                 transaction.update(matchRef, { teamA: newTargetArray, teamB: newOtherArray });
             } else {
@@ -123,56 +103,79 @@ export const joinOrSwitchTeam = async (matchId, targetTeam, playerData) => {
             }
         });
     } catch (e) {
-        console.error("Takım değiştirme hatası", e);
         throw e;
     }
 };
 
-// Takımdan Tamamen Çıkma
+// Takımdan Ayrıl
 export const leaveMatch = async (matchId, playerData) => {
     const matchRef = doc(db, "matches", matchId);
-    
     await runTransaction(db, async (transaction) => {
         const sfDoc = await transaction.get(matchRef);
         if (!sfDoc.exists()) return;
-
         const data = sfDoc.data();
-        // İki takımdan da filtreleyerek sil
         const newTeamA = (data.teamA || []).filter(p => p.id !== playerData.id);
         const newTeamB = (data.teamB || []).filter(p => p.id !== playerData.id);
-
         transaction.update(matchRef, { teamA: newTeamA, teamB: newTeamB });
     });
 };
 
-// Forma Rengi Güncelleme
+// Misafir Oyuncu Ekle (Eksik olan buydu)
+export const addGuestPlayer = async (matchId, team, guestName, guestRating) => {
+    const matchRef = doc(db, "matches", matchId);
+    const guestId = "guest_" + Date.now();
+    const guestData = {
+        id: guestId,
+        fullName: guestName + " (M)",
+        position: 'Misafir',
+        rating: parseFloat(guestRating) || 5.0
+    };
+    const field = team === 'A' ? 'teamA' : 'teamB';
+    await updateDoc(matchRef, {
+        [field]: arrayUnion(guestData)
+    });
+};
+
+// Organizatörün Oyuncu Atması (Yeni)
+export const kickPlayer = async (matchId, team, playerId) => {
+    const matchRef = doc(db, "matches", matchId);
+    try {
+        await runTransaction(db, async (transaction) => {
+            const sfDoc = await transaction.get(matchRef);
+            if (!sfDoc.exists()) throw "Maç bulunamadı!";
+            const data = sfDoc.data();
+            const teamArray = team === 'A' ? data.teamA : data.teamB;
+            const updatedTeamArray = teamArray.filter(player => player.id !== playerId);
+            
+            if (team === 'A') {
+                transaction.update(matchRef, { teamA: updatedTeamArray });
+            } else {
+                transaction.update(matchRef, { teamB: updatedTeamArray });
+            }
+        });
+    } catch (e) {
+        throw e;
+    }
+};
+
 export const updateTeamColor = async (matchId, team, color) => {
     const matchRef = doc(db, "matches", matchId);
     const field = team === 'A' ? 'colorA' : 'colorB';
     await updateDoc(matchRef, { [field]: color });
 };
 
-// Otomatik Dengeleme Algoritması
 export const balanceTeamsAlgorithm = async (matchId) => {
     const matchRef = doc(db, "matches", matchId);
-
     await runTransaction(db, async (transaction) => {
         const sfDoc = await transaction.get(matchRef);
         if (!sfDoc.exists()) return;
-
         const data = sfDoc.data();
-        // Tüm oyuncuları birleştir
         const allPlayers = [...(data.teamA || []), ...(data.teamB || [])];
-
-        // Puana göre sırala (En yüksekten en düşüğe)
         allPlayers.sort((a, b) => b.rating - a.rating);
-
         const newTeamA = [];
         const newTeamB = [];
         let ratingA = 0;
         let ratingB = 0;
-
-        // Dağıt (Greedy yaklaşımı: Zayıf kalan takıma sıradaki en iyiyi ver)
         allPlayers.forEach(player => {
             if (ratingA <= ratingB) {
                 newTeamA.push(player);
@@ -182,16 +185,62 @@ export const balanceTeamsAlgorithm = async (matchId) => {
                 ratingB += player.rating;
             }
         });
-
         transaction.update(matchRef, { teamA: newTeamA, teamB: newTeamB });
     });
 };
 
 export const deleteMatch = async (matchId) => {
+    await deleteDoc(doc(db, "matches", matchId));
+};
+
+export const checkAndProcessExpiredMatches = async () => {
+    const now = new Date().toISOString();
+    const matchesRef = collection(db, "matches");
+
+    // Sorgu: Tarihi geçmiş (date < now) AMA hala durumu 'upcoming' olanlar
+    const q = query(
+        matchesRef, 
+        where("status", "==", "upcoming"),
+        where("date", "<", now)
+    );
+
     try {
-        await deleteDoc(doc(db, "matches", matchId));
+        const snapshot = await getDocs(q);
+
+        if (snapshot.empty) return; // İşlenecek maç yok
+
+        // Her bir bitmiş maçı tek tek işle
+        for (const matchDoc of snapshot.docs) {
+            const matchId = matchDoc.id;
+            const matchData = matchDoc.data();
+
+            // Transaction ile güvenli güncelleme (Çakışmayı önler)
+            await runTransaction(db, async (transaction) => {
+                const sfDoc = await transaction.get(doc(db, "matches", matchId));
+                if (!sfDoc.exists()) return;
+
+                // Tekrar kontrol et (Belki başka kullanıcı o sırada güncellemiştir)
+                if (sfDoc.data().status === 'completed') return;
+
+                // 1. Maç durumunu 'completed' yap
+                transaction.update(doc(db, "matches", matchId), { status: 'completed' });
+
+                // 2. Oyuncuların maç sayısını artır
+                const allPlayers = [...(matchData.teamA || []), ...(matchData.teamB || [])];
+                
+                for (const player of allPlayers) {
+                    // Sadece gerçek kullanıcıları güncelle (Misafirleri atla)
+                    if (!player.id.toString().startsWith("guest_")) {
+                        const playerRef = doc(db, "players", player.id);
+                        transaction.update(playerRef, {
+                            matchCount: increment(1)
+                        });
+                    }
+                }
+            });
+        }
     } catch (error) {
-        console.error("Silme hatası:", error);
-        throw error;
+        console.error("Otomatik maç güncelleme hatası:", error);
+        // Kullanıcıya hata göstermeye gerek yok, sessizce fail olabilir
     }
 };

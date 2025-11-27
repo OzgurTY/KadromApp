@@ -4,7 +4,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import Screen from '../../components/common/Screen'; // Screen bileşenimizi kullanıyoruz
 import { colors } from '../../theme/colors';
-import { getMatchesByStatus } from '../../services/matchService'; // Yeni fonksiyon
+import { getMatchesByStatus, checkAndProcessExpiredMatches } from '../../services/matchService'; // Yeni fonksiyon
 import MatchCard from '../../components/cards/MatchCard';
 
 export default function HomeScreen({ navigation }) {
@@ -15,7 +15,7 @@ export default function HomeScreen({ navigation }) {
   const fetchMatches = async () => {
     setRefreshing(true);
     try {
-      // Seçili sekmeye göre veri çek
+      await checkAndProcessExpiredMatches();
       const data = await getMatchesByStatus(activeTab);
       setMatches(data);
     } catch (error) {

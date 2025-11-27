@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Alert, ActivityIndicator } from 'react-native';
 import Screen from '../../components/common/Screen';
-import CustomInput from '../../components/common/CustomInput';
 import { colors } from '../../theme/colors';
 import { auth } from '../../config/firebaseConfig';
 import { getUserData, updateUserProfile } from '../../services/userService';
+import ModernInput from '../../components/common/ModernInput';
 
 // Seçenekler
 const POSITIONS = ['Kaleci', 'Defans', 'Orta Saha', 'Forvet'];
@@ -94,10 +94,10 @@ export default function EditProfileScreen({ navigation }) {
         <Text style={styles.headerTitle}>Profili Düzenle</Text>
 
         <Text style={styles.label}>Ad Soyad</Text>
-        <CustomInput value={fullName} onChangeText={setFullName} />
+        <ModernInput value={fullName} onChangeText={setFullName} />
 
         <Text style={styles.label}>Yaş</Text>
-        <CustomInput value={age} onChangeText={setAge} keyboardType="numeric" placeholder="Örn: 26" />
+        <ModernInput value={age} onChangeText={setAge} keyboardType="numeric" placeholder="Örn: 26" />
 
         <SelectionGroup 
             label="Mevki" 
